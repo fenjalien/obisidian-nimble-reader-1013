@@ -3,6 +3,7 @@ import { App, Editor, MarkdownPostProcessorContext, MarkdownView, Modal, Notice,
 // Remember to rename these classes and interfaces!
 
 interface MyPluginSettings {
+	enable: boolean,
 	lineHeight: number,
 	saccadesColor: string,
 	saccadesStyle: string,
@@ -12,10 +13,10 @@ interface MyPluginSettings {
 	maxFixationParts: number,
 	fixationLowerBound: number,
 	brWordStemPercentage: number,
-
 }
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
+	enable: false,
 	lineHeight: 1,
 	saccadesColor: "",
 	saccadesStyle: 'bold-600',
@@ -33,11 +34,19 @@ export default class MyPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		// this.addSettingTab(new SampleSettingTab(this.app, this));
 		this.registerMarkdownPostProcessor((el, ctx) => this.parseElement(el));
 		console.log("loaded jiffy");
-		document.body.setAttribute('br-mode', 'on');
-		this.updateStyles();
+		this.refreshStyleSettings();
+		this.addSettingTab(new SampleSettingTab(this.app, this));
+
+		// this.addCommand({
+		// 	id: "jiffy-toggle",
+		// 	name: "Toggle Jiffy On/Off",
+		// 	callback: () => {
+		// 		this.isOn = !this.isOn;
+		// 		document.body.setAttribute('br-mode', this.isOn ? 'on' : 'off');
+		// 	}
+		// })
 	}
 
 	onunload() {
@@ -125,7 +134,7 @@ export default class MyPlugin extends Plugin {
 		return fixationsSplits.join('');
 	}
 
-	updateStyles() {
+	refreshStyleSettings() {
 		document.body.style.setProperty("--fixation-edge-opacity", this.settings.fixationEdgeOpacity.toString() + "%");
 		document.body.style.setProperty("--br-line-height", this.settings.lineHeight.toString());
 
@@ -139,6 +148,16 @@ export default class MyPlugin extends Plugin {
 		}
 		document.body.style.setProperty("--br-boldness", bold);
 		document.body.style.setProperty("--br-line-style", lineStyle);
+		document.body.setAttribute("saccades-color", this.settings.saccadesColor);
+		document.body.setAttribute("fixation-strength", this.settings.fixationStrength.toString());
+		document.body.setAttribute("saccades-interval", this.settings.saccadesInterval.toString());
+		this.saveSettings();
+	}
+
+	async updateEnable(value: boolean) {
+		this.settings.enable = value;
+		document.body.setAttribute('br-mode', value ? 'on' : 'off');
+		await this.saveSettings();
 	}
 }
 
@@ -152,22 +171,102 @@ class SampleSettingTab extends PluginSettingTab {
 	}
 
 	display(): void {
-		// const { containerEl } = this;
+		const { containerEl } = this;
 
-		// containerEl.empty();
+		containerEl.empty();
 
-		// containerEl.createEl('h2', { text: 'Settings for my awesome plugin.' });
+		new Setting(containerEl)
+			.setName('Enable')
+			.setDesc('Reading mode')
+			.addToggle((c) =>
+				c
+					.setValue(this.plugin.settings.enable)
+					.onChange((value) => this.plugin.updateEnable(value))
+			);
+		new Setting(containerEl)
+			.setName('Saccades Interval')
+			.addSlider(c =>
+				c
+					.setValue(this.plugin.settings.saccadesInterval)
+					.setLimits(0, 3, 1)
+					.setDynamicTooltip()
+					.onChange(value => {
+						this.plugin.settings.saccadesInterval = value;
+						this.plugin.refreshStyleSettings();
+					})
+					.showTooltip()
+			);
+		new Setting(containerEl)
+			.setName('Fixation Strength')
+			.addSlider(c =>
+				c
+					.setValue(this.plugin.settings.fixationStrength)
+					.setLimits(1, 4, 1)
+					.setDynamicTooltip()
+					.onChange(value => {
+						this.plugin.settings.fixationStrength = value;
+						this.plugin.refreshStyleSettings();
+					})
+					.showTooltip()
+			);
+		new Setting(containerEl)
+			.setName('Fixation Edge Opacity')
+			.addSlider(c =>
+				c
+					.setValue(this.plugin.settings.fixationEdgeOpacity)
+					.setLimits(0, 100, 20)
+					.setDynamicTooltip()
+					.onChange(value => {
+						this.plugin.settings.fixationEdgeOpacity = value;
+						this.plugin.refreshStyleSettings();
+					})
+					.showTooltip()
+			);
+		new Setting(containerEl)
+			.setName("Saccades Color")
+			.addDropdown(c =>
+				c
+					.addOptions({
+						'': 'Original',
+						'light': 'Light',
+						'light-100': 'Light-100',
+						'dark': 'Dark',
+						'dark-100': 'Dark-100'
+					})
+					.setValue(this.plugin.settings.saccadesColor)
+					.onChange(value => {
+						this.plugin.settings.saccadesColor = value;
+						this.plugin.refreshStyleSettings();
+					})
+			)
 
-		// new Setting(containerEl)
-		// 	.setName('Setting #1')
-		// 	.setDesc('It\'s a secret')
-		// 	.addText(text => text
-		// 		.setPlaceholder('Enter your secret')
-		// 		.setValue(this.plugin.settings.mySetting)
-		// 		.onChange(async (value) => {
-		// 			console.log('Secret: ' + value);
-		// 			this.plugin.settings.mySetting = value;
-		// 			await this.plugin.saveSettings();
-		// 		}));
+		new Setting(containerEl)
+			.setName("Saccades Styles")
+			.addDropdown(c =>
+				c
+					.addOptions({
+						'Bold-400': 'Bold-400',
+						'Bold-500': 'Bold-500',
+						'Bold-600': 'Bold-600',
+						'Bold-700': 'Bold-700',
+						'Bold-800': 'Bold-800',
+						'Bold-900': 'Bold-900',
+						'Solid-line': 'Solid-line',
+						'Dashed-line': 'Dashed-line',
+						'Dotted-line': 'Dotted-line',
+					})
+					.setValue(this.plugin.settings.saccadesColor)
+					.onChange(value => {
+						this.plugin.settings.saccadesColor = value;
+						this.plugin.refreshStyleSettings();
+					})
+			)
+
+		new Setting(containerEl)
+					.setName("Reset")
+					.addButton(c => 
+						c.onClick((_) => {this.plugin.settings = DEFAULT_SETTINGS})
+						)
+
 	}
 }
