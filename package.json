@@ -1,6 +1,6 @@
 {
-	"name": "obsidian-jiffy",
-	"version": "1.0.0",
+	"name": "obsidian-nimble-reader-1013",
+	"version": "0.1.0",
 	"description": "",
 	"main": "main.js",
 	"scripts": {
@@ -20,5 +20,8 @@
 		"obsidian": "latest",
 		"tslib": "2.4.0",
 		"typescript": "4.7.4"
+	},
+	"dependencies": {
+		"@codemirror/language": "^6.6.0"
 	}
 }
