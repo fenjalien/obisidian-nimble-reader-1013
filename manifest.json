@@ -3,8 +3,8 @@
 	"name": "Nimble Reader 1013",
 	"version": "0.1.0",
 	"minAppVersion": "1",
-	"description": "",
+	"description": "Helps make reading of text more nimble by bolding the initial part of all words in a note.",
 	"author": "fenjalien",
-	"authorUrl": "",
-	"isDesktopOnly": false
+	"authorUrl": "https://github.com/fenjalien",
+	"isDesktopOnly": true
 }

@@ -1,12 +1,11 @@
-import { StateEffect, StateField, EditorState, Transaction, Range, Text, RangeSet, Line, Prec } from '@codemirror/state';
+import { StateField, EditorState, Transaction, Text, RangeSetBuilder } from '@codemirror/state';
 import { DecorationSet, Decoration, EditorView } from '@codemirror/view';
-import { App, Hotkey, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
 
-// Remember to rename these classes and interfaces!
-
-const MAX_FIXATIONS = 4;
-const FIXATION_LOWER_BOUND = 0;
 const WORD_STEM_PERCENTAGE = 0.7;
+let fixationStrength = 2;
+let saccadesInterval = 0;
+let enable = false;
 
 interface NimbleReaderSettings {
   enable: boolean,
@@ -29,7 +28,7 @@ const DEFAULT_SETTINGS: NimbleReaderSettings = {
 }
 
 function insertString(index: number, str1: string, str2: string) {
-  str1 = str1.substring(0, index) + str2 + str1.substring(index);
+  return str1.substring(0, index) + str2 + str1.substring(index);
 }
 
 export default class NimbleReaderPlugin extends Plugin {
@@ -38,8 +37,7 @@ export default class NimbleReaderPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
 
-    this.registerMarkdownPostProcessor((el, ctx) => this.parseElement(el));
-    console.log("loaded jiffy");
+    this.registerMarkdownPostProcessor((el, _) => { if (enable) { this.parseElement(el) } });
     this.updateEnable(this.settings.enable);
     this.refreshStyleSettings();
     this.addSettingTab(new NimberReaderSettingTab(this.app, this));
@@ -56,6 +54,8 @@ export default class NimbleReaderPlugin extends Plugin {
         }
       ]
     })
+
+    console.log("Loaded Nimble Reader 1013 Plugin");
   }
 
   onunload() {
@@ -70,31 +70,38 @@ export default class NimbleReaderPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  parseElement(node: Node) {
-    if (node.nodeType === Node.TEXT_NODE && node.nodeValue?.length) {
-      const brSpan = document.createElement("br-span");
-      let text = node.nodeValue;
-      for (const { bold, edge, fixations } of [...processText(node.nodeValue)].reverse()) {
-        if (edge) {
-          insertString(edge.to, text, `</br-edge>`);
-          insertString(edge.from, text, `<br-edge>`);
-        }
-        for (const fix of fixations.reverse()) {
-          insertString(fix.to, text, `</br-fixation>`)
-          insertString(fix.from, text, `<br-fixation fixation-strength="${fix.f}">`)
-        }
-        insertString(bold.to, text, `</br-bold>`);
-        insertString(bold.from, text, `<br-bold>`);
+  parseElement(element: Element) {
+    for (const el of Array.from(element.children)) {
+      if (!el.className.contains("math")) {
+        this.parseElement(el);
       }
-      if (brSpan.childElementCount === 0) return;
-      node.parentElement!.replaceChild(brSpan, node);
     }
-    if (node.hasChildNodes()) node.childNodes.forEach((n) => this.parseNodes(n));
+    for (let node of Array.from(element.childNodes)) {
+      if (node.nodeType === Node.TEXT_NODE && node.nodeValue?.length) {
+        const nrSpan = document.createElement("nr-span");
+        let text = node.nodeValue;
+        for (const { bold, edge } of [...processText(node.nodeValue)].reverse()) {
+          if (edge) {
+            text = insertString(edge.to, text, `</nr-edge>`);
+            text = insertString(edge.from, text, `<nr-edge>`);
+          }
+          if (bold) {
+            text = insertString(bold.to, text, `</nr-bold>`);
+            text = insertString(bold.from, text, `<nr-bold>`);
+          }
+        }
+        nrSpan.innerHTML = text;
+        if (nrSpan.childElementCount === 0) return;
+        element.replaceChild(nrSpan, node);
+      }
+    }
   }
 
-  refreshStyleSettings() {
+  async refreshStyleSettings() {
+    saccadesInterval = this.settings.saccadesInterval;
+    fixationStrength = this.settings.fixationStrength;
     document.body.style.setProperty("--fixation-edge-opacity", this.settings.fixationEdgeOpacity.toString() + "%");
-    document.body.style.setProperty("--br-line-height", this.settings.lineHeight.toString());
+    document.body.style.setProperty("--nr-line-height", this.settings.lineHeight.toString());
 
     let bold, lineStyle;
     if (this.settings.saccadesStyle.contains("Bold")) {
@@ -104,18 +111,91 @@ export default class NimbleReaderPlugin extends Plugin {
       lineStyle = this.settings.saccadesStyle.split("-")[0];
       bold = "";
     }
-    document.body.style.setProperty("--br-boldness", bold);
-    document.body.style.setProperty("--br-line-style", lineStyle);
-    document.body.setAttribute("saccades-color", this.settings.saccadesColor);
+    document.body.style.setProperty("--nr-boldness", bold);
+    document.body.style.setProperty("--nr-line-style", lineStyle);
     document.body.setAttribute("fixation-strength", this.settings.fixationStrength.toString());
     document.body.setAttribute("saccades-interval", this.settings.saccadesInterval.toString());
-    this.saveSettings();
+    await this.saveSettings();
   }
 
   async updateEnable(value: boolean) {
     this.settings.enable = value;
-    document.body.setAttribute('br-mode', value ? 'on' : 'off');
+    enable = value;
     await this.saveSettings();
+  }
+}
+
+
+function processDecos(doc: Text): DecorationSet {
+  if (!enable) return Decoration.none;
+  let builder = new RangeSetBuilder<Decoration>();
+  for (const { bold, edge } of processText(doc.sliceString(0, doc.length))) {
+    if (bold) {
+      builder.add(bold.from, bold.to, Decoration.mark({ tagName: "nr-bold" }))
+    }
+    if (edge) {
+      builder.add(edge.from, edge.to, Decoration.mark({ tagName: "nr-edge" }))
+    }
+  }
+  return builder.finish();
+}
+
+const nimbleStateField = StateField.define<DecorationSet>({
+  create(state: EditorState) {
+    return processDecos(state.doc);
+  },
+
+  update(decos: DecorationSet, transaction: Transaction) {
+    if (transaction.docChanged) {
+      // TODO: instead of regenerating the decorations, regenerate only those changed
+      //   let lineSet = new Set<number>();
+      //   const doc = transaction.state.doc;
+      //   transaction.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+      //     const from = Math.min(fromA, fromB);
+      //     const to = Math.max(toA, toB);
+      //     if (from === to) {
+      //       lineSet.add(doc.lineAt(from).number)
+      //       return;
+      //     }
+      //     const lineFrom = doc.lineAt(from).number;
+      //     lineSet.add(lineFrom)
+      //     const lineTo = doc.lineAt(to).number;
+      //     lineSet.add(lineTo)
+      //     for (let l = lineFrom + 1; l < lineTo; l += 1) {
+      //       lineSet.add(l)
+      //     }
+      //   });
+      //   let lines = Array.from(lineSet).sort((a, b) => a - b);
+      //   console.log(lines);
+      //   decos.bold = decos.bold.map(transaction.changes)
+      //   decos.edge = decos.edge.map(transaction.changes)
+      //   decos.fixation = decos.fixation.map(transaction.changes)
+      // }
+      return processDecos(transaction.state.doc);
+    }
+
+    return decos;
+  },
+  provide: f => EditorView.decorations.from(f),
+});
+
+function* processText(text: string) {
+  for (const [i, match] of Array.from(text.matchAll(/\p{L}+/gu)).entries()) {
+    const offset = match.index!;
+    const length = match[0].length;
+    if (i % (saccadesInterval + 1) === 0) {
+      const stem = length > 3 ? Math.round(length * WORD_STEM_PERCENTAGE) : length;
+      let fixation = Math.min(Math.ceil(stem / 4) * fixationStrength, stem);
+      yield {
+        bold: { from: offset, to: offset + fixation },
+        edge: fixation === length ? null : { from: offset + fixation, to: offset + length }
+      }
+    } else {
+      yield {
+        bold: null,
+        edge: { from: offset, to: offset + length }
+      }
+    }
   }
 }
 
@@ -134,8 +214,46 @@ class NimberReaderSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     new Setting(containerEl)
+      .setName('Fixation Edge Opacity')
+      .addSlider(c =>
+        c
+          .setValue(this.plugin.settings.fixationEdgeOpacity)
+          .setLimits(0, 100, 20)
+          .setDynamicTooltip()
+          .onChange(value => {
+            this.plugin.settings.fixationEdgeOpacity = value;
+            this.plugin.refreshStyleSettings();
+          })
+          .showTooltip()
+      );
+
+    new Setting(containerEl)
+      .setName("Saccades Styles")
+      .addDropdown(c =>
+        c
+          .addOptions({
+            'Bold-400': 'Bold-400',
+            'Bold-500': 'Bold-500',
+            'Bold-600': 'Bold-600',
+            'Bold-700': 'Bold-700',
+            'Bold-800': 'Bold-800',
+            'Bold-900': 'Bold-900',
+            'Solid-line': 'Solid-line',
+            'Dashed-line': 'Dashed-line',
+            'Dotted-line': 'Dotted-line',
+          })
+          .setValue(this.plugin.settings.saccadesStyle)
+          .onChange(value => {
+            this.plugin.settings.saccadesStyle = value;
+            this.plugin.refreshStyleSettings();
+          })
+      )
+
+    new Setting(containerEl)
+      .setName("The changes to the following options requires the file to be re-rendered. This can be done by making an edit to the file, closing and reopening the file, disabling and enabling the plugin, or by reloading Obsidian.")
+
+    new Setting(containerEl)
       .setName('Enable')
-      .setDesc('Reading mode')
       .addToggle((c) =>
         c
           .setValue(this.plugin.settings.enable)
@@ -167,167 +285,5 @@ class NimberReaderSettingTab extends PluginSettingTab {
           })
           .showTooltip()
       );
-    new Setting(containerEl)
-      .setName('Fixation Edge Opacity')
-      .addSlider(c =>
-        c
-          .setValue(this.plugin.settings.fixationEdgeOpacity)
-          .setLimits(0, 100, 20)
-          .setDynamicTooltip()
-          .onChange(value => {
-            this.plugin.settings.fixationEdgeOpacity = value;
-            this.plugin.refreshStyleSettings();
-          })
-          .showTooltip()
-      );
-    new Setting(containerEl)
-      .setName("Saccades Color")
-      .addDropdown(c =>
-        c
-          .addOptions({
-            '': 'Original',
-            'light': 'Light',
-            'light-100': 'Light-100',
-            'dark': 'Dark',
-            'dark-100': 'Dark-100'
-          })
-          .setValue(this.plugin.settings.saccadesColor)
-          .onChange(value => {
-            this.plugin.settings.saccadesColor = value;
-            this.plugin.refreshStyleSettings();
-          })
-      )
-
-    new Setting(containerEl)
-      .setName("Saccades Styles")
-      .addDropdown(c =>
-        c
-          .addOptions({
-            'Bold-400': 'Bold-400',
-            'Bold-500': 'Bold-500',
-            'Bold-600': 'Bold-600',
-            'Bold-700': 'Bold-700',
-            'Bold-800': 'Bold-800',
-            'Bold-900': 'Bold-900',
-            'Solid-line': 'Solid-line',
-            'Dashed-line': 'Dashed-line',
-            'Dotted-line': 'Dotted-line',
-          })
-          .setValue(this.plugin.settings.saccadesStyle)
-          .onChange(value => {
-            this.plugin.settings.saccadesStyle = value;
-            this.plugin.refreshStyleSettings();
-          })
-      )
-  }
-}
-
-interface NimbleDecorationSets {
-  bold: DecorationSet,
-  edge: DecorationSet,
-  fixation: DecorationSet,
-}
-
-
-const boldMark: Decoration = Decoration.mark({ tagName: "br-bold" });
-const edgeMark: Decoration = Decoration.mark({ tagName: "br-edge" });
-const fixationMarks = [1, 2, 3, 4].map(i => Decoration.mark({ tagName: "br-fixation", attributes: { "fixation-strength": i.toString() } }));
-
-const nimbleStateField = StateField.define<NimbleDecorationSets>({
-  create(state: EditorState) {
-    return processDecos(state.doc);
-  },
-
-  update(decos: NimbleDecorationSets, transaction: Transaction) {
-    if (transaction.docChanged) {
-      // TODO: instead of regenerating the decorations, regenerate only those changed
-      //   let lineSet = new Set<number>();
-      //   const doc = transaction.state.doc;
-      //   transaction.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
-      //     const from = Math.min(fromA, fromB);
-      //     const to = Math.max(toA, toB);
-      //     if (from === to) {
-      //       lineSet.add(doc.lineAt(from).number)
-      //       return;
-      //     }
-      //     const lineFrom = doc.lineAt(from).number;
-      //     lineSet.add(lineFrom)
-      //     const lineTo = doc.lineAt(to).number;
-      //     lineSet.add(lineTo)
-      //     for (let l = lineFrom + 1; l < lineTo; l += 1) {
-      //       lineSet.add(l)
-      //     }
-      //   });
-      //   let lines = Array.from(lineSet).sort((a, b) => a - b);
-      //   console.log(lines);
-      //   decos.bold = decos.bold.map(transaction.changes)
-      //   decos.edge = decos.edge.map(transaction.changes)
-      //   decos.fixation = decos.fixation.map(transaction.changes)
-      // }
-      return processDecos(transaction.state.doc);
-    }
-
-    return decos;
-  },
-  provide: f => [
-    Prec.lowest(EditorView.decorations.from(f, (v) => v.bold)),
-    EditorView.decorations.from(f, (v) => v.fixation),
-    EditorView.decorations.from(f, (v) => v.edge)
-  ],
-});
-
-function processDecos(doc: Text) {
-  let boldDecos: Range<Decoration>[] = [];
-  let edgeDecos: Range<Decoration>[] = [];
-  let fixationDecos: Range<Decoration>[] = [];
-  for (const { bold, edge, fixations } of processText(doc.sliceString(0, doc.length))) {
-    boldDecos.push(boldMark.range(bold.from, bold.to))
-    if (edge) {
-      edgeDecos.push(edgeMark.range(edge.from, edge.to))
-    }
-    fixationDecos.push(...fixations.map(fix => fixationMarks[fix.f].range(fix.from, fix.to)))
-  }
-  return {
-    bold: RangeSet.of(boldDecos),
-    edge: RangeSet.of(edgeDecos),
-    fixation: RangeSet.of(fixationDecos)
-  };
-}
-
-function* processText(text: string) {
-  for (const match of text.matchAll(/\p{L}+/gu)) {
-    const { bold, edge } = processWord(match[0], match.index!);
-    yield {
-      bold,
-      edge,
-      fixations: [...processFixations(match[0].slice(0, bold.to - bold.from), bold.from)]
-    }
-  }
-}
-
-function processWord(text: string, offset: number) {
-  const stem = text.length > 3 ? Math.round(text.length * WORD_STEM_PERCENTAGE) : text.length;
-  return {
-    bold: { from: offset, to: offset + stem },
-    edge: stem === text.length ? null : { from: offset + stem, to: offset + text.length }
-  }
-}
-
-function* processFixations(text: string, offset: number) {
-  const computedMaxFixations = text.length >= MAX_FIXATIONS ? MAX_FIXATIONS : text.length;
-  const fixationWidth = Math.ceil(text.length / computedMaxFixations);
-  if (fixationWidth === FIXATION_LOWER_BOUND) {
-    return fixationMarks[0].range(offset, offset + text.length);
-  } else {
-    for (let f = 0; f < computedMaxFixations; f += 1) {
-      const from = offset + f * fixationWidth;
-      const to = Math.min(from + fixationWidth, offset + text.length);
-      // if text.length is 5 from becomes greater than to so just ignore it
-      if (from < to) {
-        yield { from, to, f };
-        // return;
-      }
-
-    }
   }
 }
