@@ -1,7 +1,8 @@
-on:
+on: 
   push:
     tags: 
       - '*.*.*'
+  workflow_dispatch:
 
 name: Publish Release
 
