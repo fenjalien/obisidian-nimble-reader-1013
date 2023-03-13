@@ -9,9 +9,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@latest
+      - uses: actions/checkout@v3.3.0
       - name: Setup Node
-        uses: actions/setup-node@latest
+        uses: actions/setup-node@v3.6.0
         with:
           node-version: latest
       - name: Install Dependencies
@@ -19,7 +19,7 @@ jobs:
       - name: Build
         run: npm run build
       - name: Release
-        uses: softprops/action-gh-release@latest
+        uses: softprops/action-gh-release@v0.1.15
         with: 
           files: |
             main.js
