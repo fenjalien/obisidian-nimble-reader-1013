@@ -3,13 +3,23 @@ on:
     tags: 
       - '*.*.*'
   workflow_dispatch:
-
+    inputs:
+      tags:
+        description: 'Test scenario tags'
+        required: true
+        type: string
 name: Publish Release
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Conditional value for GitHub Action
+        uses: haya14busa/action-cond@v1.0.0
+        with:
+          cond: ${{github.ref_type == 'tag'}}
+          if_true: ${{github.ref_name}}
+          if_false: ${{inputs.tags}}
       - uses: actions/checkout@v3.3.0
       - name: Setup Node
         uses: actions/setup-node@v3.6.0
