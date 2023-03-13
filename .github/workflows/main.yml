@@ -14,9 +14,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-          cond: ${{github.ref_type == 'tag'}}
-          if_true: ${{github.ref_name}}
-          if_false: ${{inputs.tags}}
       - uses: actions/checkout@v3.3.0
       - name: Setup Node
         uses: actions/setup-node@v3.6.0
