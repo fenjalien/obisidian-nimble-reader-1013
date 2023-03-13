@@ -8,6 +8,10 @@ on:
         description: 'Test scenario tags'
         required: true
         type: string
+
+permissions:
+  contents: write
+
 name: Publish Release
 
 jobs:
